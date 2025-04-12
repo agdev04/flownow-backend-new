@@ -12,6 +12,7 @@ from models import User, ChatSession, ChatMessage, SessionLocal
 from jose import jwt, JWTError
 import requests
 from celery_worker import save_chat_session_task, save_chat_message_task
+from sqlalchemy.orm import Session
 
 app = FastAPI()
 
@@ -270,7 +271,7 @@ async def chat(request: Request, current_user=Depends(verify_clerk_token), db=De
         raise HTTPException(status_code=500, detail=f"OpenRouter or retrieval error: {str(e)}")
 
 @app.get("/chat_sessions/", response_model=None)
-async def get_chat_sessions(current_user=Depends(verify_clerk_token), db: OrmSession = Depends(get_db)):
+async def get_chat_sessions(current_user=Depends(verify_clerk_token), db: Session = Depends(get_db)):
     """Returns all chat sessions and their messages for the current authenticated user."""
     sessions = db.query(ChatSession).filter_by(user_id=current_user.id).all()
     session_data = []
