@@ -21,7 +21,7 @@ RUN pip install --upgrade pip && pip install -r requirements.txt
 COPY . .
 
 # Expose FastAPI port
-EXPOSE 8000
+EXPOSE 3005
 
 # Entrypoint to run both FastAPI and Celery worker
 COPY entrypoint.sh /entrypoint.sh

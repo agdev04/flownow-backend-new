@@ -1,7 +1,7 @@
 #!/bin/sh
 
 # Start FastAPI server in the background
-uvicorn main:app --host 0.0.0.0 --port 8000 &
+uvicorn main:app --host 0.0.0.0 --port 3005 &
 
 # Start Celery worker in the background
 touch celery_worker.log
