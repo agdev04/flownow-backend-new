@@ -1,0 +1,13 @@
+sqlalchemy
+uvicorn
+python-multipart
+python-jose
+pypdfium2
+pytesseract
+mysqlclient
+Pillow
+pinecone
+cohere
+httpx
+python-dotenv
+google-api-python-client
