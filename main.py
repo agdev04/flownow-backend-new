@@ -295,3 +295,27 @@ async def get_chat_sessions(current_user=Depends(verify_clerk_token), db: Sessio
             ]
         })
     return {"sessions": session_data}
+
+@app.put("/chat_sessions/{session_id}/title")
+async def update_session_title(session_id: int, data: dict, current_user=Depends(verify_clerk_token), db: Session = Depends(get_db)):
+    """Allows the current authenticated user to update the title of their chat session."""
+    session = db.query(ChatSession).filter_by(id=session_id, user_id=current_user.id).first()
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found.")
+    new_title = data.get("title")
+    if not new_title:
+        raise HTTPException(status_code=400, detail="Title is required.")
+    session.title = new_title
+    db.commit()
+    db.refresh(session)
+    return {"session_id": session.id, "title": session.title}
+
+@app.delete("/chat_sessions/{session_id}")
+async def delete_session(session_id: int, current_user=Depends(verify_clerk_token), db: Session = Depends(get_db)):
+    """Allows the current authenticated user to delete their chat session."""
+    session = db.query(ChatSession).filter_by(id=session_id, user_id=current_user.id).first()
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found.")
+    db.delete(session)
+    db.commit()
+    return {"message": f"Session {session_id} deleted successfully."}

@@ -20,3 +20,16 @@ Content-Type: application/json
 ### Get User Chat Sessions
 GET https://b88g8kk0k0owcgw08ocgg8gk.coolify.agnieve.com/chat_sessions/
 Authorization: Bearer TOKEN_FROM_AUTH_ENDPOINT
+
+### Update Chat Session Title
+PUT http://localhost:3005/chat_sessions/1/title
+Content-Type: application/json
+Authorization: Bearer YOUR_TOKEN_HERE
+
+{
+    "title": "New Session Title"
+}
+
+### Delete Chat Session
+DELETE http://localhost:3005/chat_sessions/1
+Authorization: Bearer YOUR_TOKEN_HERE
