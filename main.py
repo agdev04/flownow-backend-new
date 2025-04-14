@@ -222,10 +222,9 @@ async def chat(request: Request, current_user=Depends(verify_clerk_token), db=De
     # If label is not strictly 'yes', halt here
     if not ("no" in ai_label and "yes" not in ai_label):
         ai_response = "Thank you for your question! I'm here to help with life, emotions, or meditation topics. If you have questions related to those topics, feel free to ask!"
-        markdown_response = f"""\n**Assistant:**\n\n{ai_response}\n"""
-        assistant_msg_dict = {"session_id": session.id, "user_id": current_user.id, "role": "assistant", "message": markdown_response, "fault": 1}
+        assistant_msg_dict = {"session_id": session.id, "user_id": current_user.id, "role": "assistant", "message": ai_response, "fault": 1}
         save_chat_message_task.delay(assistant_msg_dict)
-        return {"answer": markdown_response, "sources": [], "session_id": session.id}
+        return {"answer": ai_response, "sources": [], "session_id": session.id}
     try:
         pc = Pinecone(api_key=pinecone_api_key)
         if not pc.has_index(pinecone_index_name):
@@ -246,10 +245,9 @@ async def chat(request: Request, current_user=Depends(verify_clerk_token), db=De
         )
         if not contexts:
             ai_response = "I couldn’t find any matching information in your uploaded documents to answer this question. But hey, don't worry—I'm always here for you! If you'd like to chat about life, feelings, or meditation, just let me know and I'll do my best to cheer you on and support you!"
-            markdown_response = f"""\n**Assistant:**\n\n{ai_response}\n"""
-            assistant_msg_dict = {"session_id": session.id, "user_id": current_user.id, "role": "assistant", "message": markdown_response, "fault": 0}
+            assistant_msg_dict = {"session_id": session.id, "user_id": current_user.id, "role": "assistant", "message": ai_response, "fault": 0}
             save_chat_message_task.delay(assistant_msg_dict)
-            return {"answer": markdown_response, "sources": [], "session_id": session.id}
+            return {"answer": ai_response, "sources": [], "session_id": session.id}
         async with httpx.AsyncClient(timeout=60.0) as client:
             openrouter_url = "https://openrouter.ai/api/v1/chat/completions"
             headers = {
@@ -259,7 +257,7 @@ async def chat(request: Request, current_user=Depends(verify_clerk_token), db=De
             payload = {
                 "model": "gryphe/mythomax-l2-13b",
                 "messages": [
-                    {"role": "system", "content": "You are an extremely friendly, supportive, uplifting buddy. When answering questions about life, emotions, or meditation, always use warm, conversational, and positive language, and prioritize making the user feel heard and encouraged! IMPORTANT: Users are reading your advice as a chat, so they cannot close their eyes while following your tips. Please avoid suggesting the user close their eyes for meditation or exercises, and instead offer instructions that can be followed while reading with eyes open. Use the uploaded documents as your main reference, but feel free to add encouraging words from your friendly knowledge. Always format your entire answer as well-structured Markdown (e.g., bold for emphasis, bullet lists, sections, etc.), ensuring every answer is returned in Markdown syntax."},
+                    {"role": "system", "content": "You are an extremely friendly, supportive, uplifting buddy. When answering questions about life, emotions, or meditation, always use warm, conversational, and positive language, and prioritize making the user feel heard and encouraged! IMPORTANT: Users are reading your advice as a chat, so they cannot close their eyes while following your tips. Please avoid suggesting the user close their eyes for meditation or exercises, and instead offer instructions that can be followed while reading with eyes open. Use the uploaded documents as your main reference, but feel free to add encouraging words from your friendly knowledge. ALWAYS format your entire response as markdown code for improved layout and styling."},
                     {"role": "user", "content": prompt}
                 ]
             }
@@ -267,12 +265,11 @@ async def chat(request: Request, current_user=Depends(verify_clerk_token), db=De
             resp.raise_for_status()
             resp_json = resp.json()
             answer = resp_json["choices"][0]["message"]["content"]
-            markdown_response = f"""\n**Assistant:**\n\n{answer}\n"""
             # Save assistant's message
-            assistant_msg = ChatMessage(session_id=session.id, user_id=current_user.id, role="assistant", message=markdown_response, fault=0)
+            assistant_msg = ChatMessage(session_id=session.id, user_id=current_user.id, role="assistant", message=answer, fault=0)
             db.add(assistant_msg)
             db.commit()
-            return {"answer": markdown_response, "sources": contexts, "session_id": session.id}
+            return {"answer": answer, "sources": contexts, "session_id": session.id}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"OpenRouter or retrieval error: {str(e)}")
 
