@@ -213,6 +213,9 @@ async def chat(request: Request, current_user=Depends(verify_clerk_token), db=De
                     {"role": "user", "content": classifier_prompt}
                 ]
             }
+
+            print("LLM Model used:", llm_model)
+            
             classification_resp = await client.post(openrouter_url, headers=headers, json=classification_payload)
             classification_resp.raise_for_status()
             raw = classification_resp.json()
