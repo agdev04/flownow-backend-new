@@ -182,6 +182,7 @@ async def chat(request: Request, current_user=Depends(verify_clerk_token), db=De
     pinecone_api_key = os.getenv("PINECONE_API_KEY")
     pinecone_index_name = os.getenv("PINECONE_INDEX_NAME", "sed-met")
     openrouter_api_key = os.getenv("OPENROUTER_API_KEY")
+    llm_model = os.getenv("LLM_MODEL", "gryphe/mythomax-l2-13b")
     if not all([cohere_api_key, pinecone_api_key, openrouter_api_key]):
         raise HTTPException(status_code=500, detail="Missing required API keys.")
     try:
@@ -206,7 +207,7 @@ async def chat(request: Request, current_user=Depends(verify_clerk_token), db=De
                 \"{query}\"
                 """
             classification_payload = {
-                "model": "gryphe/mythomax-l2-13b",
+                "model": llm_model,
                 "messages": [
                     {"role": "system", "content": "You are a topic classifier.ONLY reply Yes or No."},
                     {"role": "user", "content": classifier_prompt}
