@@ -270,6 +270,9 @@ async def chat(request: Request, current_user=Depends(verify_clerk_token), db=De
         - Using bullet points for clarity when needed
         - Adding line breaks for better readability
         - Highlighting key points in bold
+        - Use emojis and short phrases for a more engaging experience
+        - Avoiding to meantion the source of the information
+        - Avoid to answer questions that are not related to the context
         
         Let me break this down for you:
         """
