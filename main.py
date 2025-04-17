@@ -17,6 +17,15 @@ import requests
 from celery_worker import save_chat_session_task, save_chat_message_task
 from sqlalchemy.orm import Session
 
+# Langchain Imports
+from langchain_pinecone import PineconeVectorStore
+from langchain_cohere import CohereEmbeddings
+from langchain_community.chat_models import ChatOpenAI # Assuming OpenRouter compatibility or replace later
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.runnables import RunnablePassthrough
+from langchain_core.output_parsers import StrOutputParser
+from langchain_core.documents import Document # Import Document for creating Langchain documents
+
 app = FastAPI()
 
 app.add_middleware(
@@ -111,48 +120,80 @@ async def upload_pdf(pdf_file: UploadFile = File(...)):
             text = pytesseract.image_to_string(page_image)
             texts.append(text)
         os.unlink(temp_pdf_path)
-        # --- Begin Pinecone & Cohere Integration ---
-        import cohere
-        from pinecone.grpc import PineconeGRPC as Pinecone
-        from pinecone import ServerlessSpec
-        from dotenv import load_dotenv
-        load_dotenv()
+
+        # --- Begin Langchain Integration for PDF Upload ---
         cohere_api_key = os.getenv("COHERE_API_KEY")
-        pinecone_api_key = os.getenv("PINECONE_API_KEY")
+        pinecone_api_key = os.getenv("PINECONE_API_KEY") # Ensure PINECONE_API_KEY is set in .env
         pinecone_index_name = os.getenv("PINECONE_INDEX_NAME", "sed-met")
-        openrouter_api_key = os.getenv("OPENROUTER_API_KEY")
-        if not all([cohere_api_key, pinecone_api_key, openrouter_api_key]):
-            raise HTTPException(status_code=500, detail="Missing required API keys.")
-        co = cohere.Client(cohere_api_key)
-        pc = Pinecone(api_key=pinecone_api_key)
-        # Ensure index exists using new SDK style
-        if not pc.has_index(pinecone_index_name):
-            pc.create_index(
-                name=pinecone_index_name,
-                vector_type="dense",
-                dimension=1024,
-                metric="cosine",
-                spec=ServerlessSpec(
-                    cloud="aws",
-                    region="us-east-1"
-                ),
-                deletion_protection="disabled",
-                tags={"environment": "development"}
-            )
-        index = pc.Index(pinecone_index_name)
-        embeddings = co.embed(texts=texts, model="embed-english-v3.0", input_type="search_document").embeddings
-        to_upsert = []
-        for idx, (embedding, text) in enumerate(zip(embeddings, texts)):
-            to_upsert.append({
-                "id": f"{pdf_file.filename}-page-{idx+1}",
-                "values": embedding,
-                "metadata": {"filename": pdf_file.filename, "page": idx+1, "text": text}
-            })
-        # Upsert all pages
-        index.upsert(vectors=to_upsert)
-        # --- End Pinecone & Cohere Integration ---
-        return JSONResponse(content={"pages": len(images), "texts": texts})
+
+        if not all([cohere_api_key, pinecone_api_key, pinecone_index_name]):
+            raise HTTPException(status_code=500, detail="Missing required API keys or index name for PDF processing.")
+
+        # Initialize Langchain components
+        embeddings = CohereEmbeddings(model="embed-english-v3.0", cohere_api_key=cohere_api_key)
+
+        # Create Langchain Document objects
+        documents = []
+        for idx, text in enumerate(texts):
+            metadata = {"filename": pdf_file.filename, "page": idx + 1}
+            documents.append(Document(page_content=text, metadata=metadata))
+
+        # Upsert using Langchain's PineconeVectorStore
+        # This handles index creation check implicitly if using `from_documents`
+        # Note: Ensure PINECONE_API_KEY is available in the environment for PineconeVectorStore
+        vectorstore = PineconeVectorStore.from_documents(
+            documents,
+            index_name=pinecone_index_name,
+            embedding=embeddings
+            # pinecone_api_key=pinecone_api_key # Usually picked from env
+        )
+        # --- End Langchain Integration for PDF Upload ---
+
+        # --- Old Pinecone & Cohere Integration Removed ---
+        # import cohere
+        # from pinecone.grpc import PineconeGRPC as Pinecone
+        # from pinecone import ServerlessSpec
+        # from dotenv import load_dotenv
+        # load_dotenv()
+        # cohere_api_key = os.getenv("COHERE_API_KEY")
+        # pinecone_api_key = os.getenv("PINECONE_API_KEY")
+        # pinecone_index_name = os.getenv("PINECONE_INDEX_NAME", "sed-met")
+        # openrouter_api_key = os.getenv("OPENROUTER_API_KEY")
+        # if not all([cohere_api_key, pinecone_api_key, openrouter_api_key]):
+        #     raise HTTPException(status_code=500, detail="Missing required API keys.")
+        # co = cohere.Client(cohere_api_key)
+        # pc = Pinecone(api_key=pinecone_api_key)
+        # # Ensure index exists using new SDK style
+        # if not pc.has_index(pinecone_index_name):
+        #     pc.create_index(
+        #         name=pinecone_index_name,
+        #         vector_type="dense",
+        #         dimension=1024,
+        #         metric="cosine",
+        #         spec=ServerlessSpec(
+        #             cloud="aws",
+        #             region="us-east-1"
+        #         ),
+        #         deletion_protection="disabled",
+        #         tags={"environment": "development"}
+        #     )
+        # index = pc.Index(pinecone_index_name)
+        # embeddings_result = co.embed(texts=texts, model="embed-english-v3.0", input_type="search_document").embeddings
+        # to_upsert = []
+        # for idx, (embedding, text) in enumerate(zip(embeddings_result, texts)):
+        #     to_upsert.append({
+        #         "id": f"{pdf_file.filename}-page-{idx+1}",
+        #         "values": embedding,
+        #         "metadata": {"filename": pdf_file.filename, "page": idx+1, "text": text}
+        #     })
+        # # Upsert all pages
+        # index.upsert(vectors=to_upsert)
+        # --- End Old Pinecone & Cohere Integration ---
+
+        return JSONResponse(content={"message": f"Successfully processed and indexed {len(documents)} pages from {pdf_file.filename}.", "pages": len(images)})
     except Exception as e:
+        # Log the error appropriately
+        print(f"Error during PDF processing: {e}")
         raise HTTPException(status_code=500, detail=f"Processing error: {str(e)}")
 
 @app.post("/chat/")
@@ -162,120 +203,94 @@ async def chat(request: Request, current_user=Depends(verify_clerk_token), db=De
     session_id = data.get("session_id")
     if not query:
         raise HTTPException(status_code=400, detail="Query required.")
+
     # --- Find or create a chat session for this user ---
     if session_id:
         session = db.query(ChatSession).filter_by(id=session_id, user_id=current_user.id).first()
+        if not session: # Handle case where session_id is provided but doesn't exist or belong to user
+             raise HTTPException(status_code=404, detail="Chat session not found or access denied.")
     else:
         session_dict = {"user_id": current_user.id}
-        session_id = save_chat_session_task.delay(session_dict).get(timeout=10)
-        session = ChatSession(id=session_id, user_id=current_user.id)
+        # Use .get() for potentially long-running task, consider timeout
+        try:
+            session_id = save_chat_session_task.delay(session_dict).get(timeout=10) 
+            session = ChatSession(id=session_id, user_id=current_user.id) # Create a temporary object for immediate use
+        except Exception as e:
+            # Log the error appropriately
+            print(f"Error creating chat session via Celery: {e}")
+            raise HTTPException(status_code=500, detail="Failed to create chat session.")
+
     # Save user message asynchronously
     user_msg_dict = {"session_id": session.id, "user_id": current_user.id, "role": "user", "message": query}
     save_chat_message_task.delay(user_msg_dict)
-    # --- AI processing below this ---
-    import cohere
-    from pinecone.grpc import PineconeGRPC as Pinecone
-    from pinecone import ServerlessSpec
-    from dotenv import load_dotenv
-    load_dotenv()
-    cohere_api_key = os.getenv("COHERE_API_KEY")
-    pinecone_api_key = os.getenv("PINECONE_API_KEY")
-    pinecone_index_name = os.getenv("PINECONE_INDEX_NAME", "sed-met")
-    openrouter_api_key = os.getenv("OPENROUTER_API_KEY")
-    llm_model = os.getenv("LLM_MODEL", "gryphe/mythomax-l2-13b")
-    if not all([cohere_api_key, pinecone_api_key, openrouter_api_key]):
-        raise HTTPException(status_code=500, detail="Missing required API keys.")
+
+    # --- Langchain RAG Implementation ---
     try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            openrouter_url = "https://openrouter.ai/api/v1/chat/completions"
-            headers = {
-                "Authorization": f"Bearer {openrouter_api_key}",
-                "Content-Type": "application/json"
-            }
-            classifier_prompt = f"""
-                Classify the following user input strictly as \"yes\" (general knowledge) or \"no\" (not general knowledge).  
-                General knowledge = factual questions (science, history, definitions, etc.).  
-                Not general knowledge = personal advice (stress, emotions, success, life tips).  
+        # Load API keys
+        cohere_api_key = os.getenv("COHERE_API_KEY")
+        pinecone_api_key = os.getenv("PINECONE_API_KEY")
+        pinecone_index_name = os.getenv("PINECONE_INDEX_NAME", "sed-met")
+        openrouter_api_key = os.getenv("OPENROUTER_API_KEY")
+        llm_model = os.getenv("LLM_MODEL", "gryphe/mythomax-l2-13b")
+        openrouter_base_url = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
 
-                Examples:  
-                1. \"How does photosynthesis work?\" → yes  
-                2. \"How to be happier?\" → no  
-                3. \"What is the capital of France?\" → yes  
-                4. \"How to deal with anxiety?\" → no  
+        if not all([cohere_api_key, pinecone_api_key, openrouter_api_key, pinecone_index_name]):
+            raise HTTPException(status_code=500, detail="Missing required API keys or index name.")
 
-                Return only \"yes\" or \"no\" for this input:  
-                \"{query}\"
-                """
-            classification_payload = {
-                "model": llm_model,
-                "messages": [
-                    {"role": "system", "content": "You are a topic classifier.ONLY reply Yes or No."},
-                    {"role": "user", "content": classifier_prompt}
-                ]
-            }
-
-            print("LLM Model used:", llm_model)
-            
-            classification_resp = await client.post(openrouter_url, headers=headers, json=classification_payload)
-            classification_resp.raise_for_status()
-            raw = classification_resp.json()
-            ai_label = raw["choices"][0]["message"]["content"].strip().lower()
-            print("Classifier AI label:", ai_label)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"OpenRouter topic classification error: {str(e)}")
-    # If label is not strictly 'yes', halt here
-    if not ("no" in ai_label and "yes" not in ai_label):
-        ai_response = "Thank you for your question! I'm here to help with life, emotions, or meditation topics. If you have questions related to those topics, feel free to ask!"
-        assistant_msg_dict = {"session_id": session.id, "user_id": current_user.id, "role": "assistant", "message": ai_response, "fault": 1}
-        save_chat_message_task.delay(assistant_msg_dict)
-        return {"answer": ai_response, "sources": [], "session_id": session.id}
-    try:
-        pc = Pinecone(api_key=pinecone_api_key)
-        if not pc.has_index(pinecone_index_name):
-            raise HTTPException(status_code=500, detail="Pinecone index does not exist.")
-        co = cohere.Client(cohere_api_key)
-        index = pc.Index(pinecone_index_name)
-        query_embedding = co.embed(texts=[query], model="embed-english-v3.0", input_type="search_query").embeddings[0]
-        search_results = index.query(vector=query_embedding, top_k=5, include_metadata=True)
-        contexts = []
-        for match in search_results.matches:
-            md = getattr(match, "metadata", match.get("metadata", {}))
-            text = md.get("text")
-            if text:
-                contexts.append(text)
-        prompt = (
-            "You are a super friendly assistant—like a wise, supportive friend. Your job is to help users with life, emotions, or meditation questions. Always use warm, buddy-like, conversational, and encouraging language, making users feel understood, comfortable, and uplifted. Prefer plain, positive, and caring responses! Your main reference is the relevant uploaded documents provided below as context, but you can also use your own reasoning, knowledge, and positive vibes to make answers as helpful, comforting, and reassuring as possible. Here are relevant context snippets (if any):\n---\n"
-            + "\n---\n".join(contexts) + f"\n\nQuestion: {query}\nAnswer:"
+        # 1. Initialize Langchain components
+        embeddings = CohereEmbeddings(model="embed-english-v3.0", cohere_api_key=cohere_api_key)
+        vectorstore = PineconeVectorStore.from_existing_index(
+            index_name=pinecone_index_name,
+            embedding=embeddings,
+            # pinecone_api_key=pinecone_api_key # Often handled by environment variables PINECONE_API_KEY
         )
-        if not contexts:
-            ai_response = "I couldn’t find any matching information in your uploaded documents to answer this question. But hey, don't worry—I'm always here for you! If you'd like to chat about life, feelings, or meditation, just let me know and I'll do my best to cheer you on and support you!"
-            assistant_msg_dict = {"session_id": session.id, "user_id": current_user.id, "role": "assistant", "message": ai_response, "fault": 0}
-            save_chat_message_task.delay(assistant_msg_dict)
-            return {"answer": ai_response, "sources": [], "session_id": session.id}
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            openrouter_url = "https://openrouter.ai/api/v1/chat/completions"
-            headers = {
-                "Authorization": f"Bearer {openrouter_api_key}",
-                "Content-Type": "application/json"
-            }
-            payload = {
-                "model": "gryphe/mythomax-l2-13b",
-                "messages": [
-                    {"role": "system", "content": "You are an extremely friendly, supportive, uplifting buddy. When answering questions about life, emotions, or meditation, always use warm, conversational, and positive language, and prioritize making the user feel heard and encouraged! IMPORTANT: Users are reading your advice as a chat, so they cannot close their eyes while following your tips. Please avoid suggesting the user close their eyes for meditation or exercises, and instead offer instructions that can be followed while reading with eyes open. Use the uploaded documents as your main reference, but feel free to add encouraging words from your friendly knowledge. ALWAYS format your entire response as markdown code for improved layout and styling."},
-                    {"role": "user", "content": prompt}
-                ]
-            }
-            resp = await client.post(openrouter_url, headers=headers, json=payload)
-            resp.raise_for_status()
-            resp_json = resp.json()
-            answer = resp_json["choices"][0]["message"]["content"]
-            # Save assistant's message
-            assistant_msg = ChatMessage(session_id=session.id, user_id=current_user.id, role="assistant", message=answer, fault=0)
-            db.add(assistant_msg)
-            db.commit()
-            return {"answer": answer, "sources": contexts, "session_id": session.id}
+        retriever = vectorstore.as_retriever()
+
+        # Configure ChatOpenAI for OpenRouter
+        llm = ChatOpenAI(
+            model=llm_model,
+            openai_api_key=openrouter_api_key,
+            openai_api_base=openrouter_base_url,
+            # temperature=0.7, # Optional: Adjust temperature
+            # max_tokens=1024, # Optional: Adjust max tokens
+        )
+
+        # 2. Define Prompt Template
+        template = """
+        Hey there! I'm your friendly buddy here to help. Answer the user's question based *only* on the context I've found for you. Keep it conversational and friendly, like we're just chatting! Don't mention where the info came from, just give the answer.
+        Context:
+        {context}
+
+        User Question: {question}
+
+        Your Answer:
+        """
+        prompt = ChatPromptTemplate.from_template(template)
+
+        # 3. Define RAG Chain using LCEL
+        rag_chain = (
+            {"context": retriever, "question": RunnablePassthrough()}
+            | prompt
+            | llm
+            | StrOutputParser()
+        )
+
+        # 4. Invoke Chain
+        ai_response = rag_chain.invoke(query)
+
+        # Save AI message asynchronously
+        ai_msg_dict = {"session_id": session.id, "user_id": current_user.id, "role": "assistant", "message": ai_response}
+        save_chat_message_task.delay(ai_msg_dict)
+
+        return JSONResponse(content={"response": ai_response, "session_id": session.id})
+
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"OpenRouter or retrieval error: {str(e)}")
+        # Log the error appropriately
+        print(f"Error during Langchain RAG processing: {e}")
+        # Consider more specific error handling based on potential Langchain exceptions
+        raise HTTPException(status_code=500, detail=f"Chat processing error: {str(e)}")
+
+# --- Old /chat/ logic removed, replaced by Langchain implementation above ---
 
 @app.get("/chat_sessions/", response_model=None)
 async def get_chat_sessions(current_user=Depends(verify_clerk_token), db: Session = Depends(get_db)):

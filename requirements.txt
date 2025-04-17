@@ -15,3 +15,7 @@ fastapi
 celery
 redis
 grpcio
+langchain
+langchain-pinecone
+langchain-cohere
+langchain-community # For potential OpenRouter integration or other components
