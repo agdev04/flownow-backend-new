@@ -20,7 +20,7 @@ from sqlalchemy.orm import Session
 # Langchain Imports
 from langchain_pinecone import PineconeVectorStore
 from langchain_cohere import CohereEmbeddings
-from langchain_community.chat_models import ChatOpenAI # Assuming OpenRouter compatibility or replace later
+from langchain_openai import ChatOpenAI # Updated import
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import RunnablePassthrough
 from langchain_core.output_parsers import StrOutputParser
