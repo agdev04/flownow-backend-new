@@ -257,13 +257,21 @@ async def chat(request: Request, current_user=Depends(verify_clerk_token), db=De
 
         # 2. Define Prompt Template
         template = """
-        Hey there! I'm your friendly buddy here to help. Answer the user's question based *only* on the context I've found for you. Keep it conversational and friendly, like we're just chatting! Don't mention where the info came from, just give the answer.
-        Context:
+        Hey there! I'm your friendly buddy here to help. Here's what I found for you:
+        
+        **Context Summary:**
         {context}
-
-        User Question: {question}
-
-        Your Answer:
+        
+        **Your Question:**
+        {question}
+        
+        **My Answer:**
+        - I'll keep this conversational and easy to follow
+        - Using bullet points for clarity when needed
+        - Adding line breaks for better readability
+        - Highlighting key points in bold
+        
+        Let me break this down for you:
         """
         prompt = ChatPromptTemplate.from_template(template)
 
