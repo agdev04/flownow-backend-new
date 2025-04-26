@@ -38,3 +38,45 @@ Authorization: Bearer YOUR_TOKEN_HERE
 ### Delete Chat Session
 DELETE http://localhost:3005/chat_sessions/1
 Authorization: Bearer YOUR_TOKEN_HERE
+
+### Create Meditation
+POST http://localhost:8000/meditations/
+Authorization: Bearer YOUR_TOKEN_HERE
+Content-Type: application/json
+
+{
+  "title": "Morning Calm",
+  "description": "A meditation for a calm start to your day.",
+  "category": "Mindfulness",
+  "tags": ["morning", "calm"],
+  "script": "Sit comfortably and focus on your breath...",
+  "image_url": "https://example.com/image.jpg",
+  "audio_url": "https://example.com/audio.mp3"
+}
+
+### Get All Meditations
+GET http://localhost:8000/meditations/
+Authorization: Bearer YOUR_TOKEN_HERE
+
+### Get Meditation by ID
+GET http://localhost:8000/meditations/1
+Authorization: Bearer YOUR_TOKEN_HERE
+
+### Update Meditation
+PUT http://localhost:8000/meditations/1
+Authorization: Bearer YOUR_TOKEN_HERE
+Content-Type: application/json
+
+{
+  "title": "Updated Meditation Title",
+  "description": "Updated description.",
+  "category": "Relaxation",
+  "tags": ["evening", "relax"],
+  "script": "Updated script...",
+  "image_url": "https://example.com/new-image.jpg",
+  "audio_url": "https://example.com/new-audio.mp3"
+}
+
+### Delete Meditation
+DELETE http://localhost:8000/meditations/1
+Authorization: Bearer YOUR_TOKEN_HERE

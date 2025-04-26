@@ -11,7 +11,7 @@ from PIL import Image
 import io
 import tempfile
 import httpx
-from models import User, ChatSession, ChatMessage, SessionLocal
+from models import Meditation, User, ChatSession, ChatMessage, SessionLocal
 from jose import jwt, JWTError
 import requests
 from celery_worker import save_chat_session_task, save_chat_message_task
