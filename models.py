@@ -33,4 +33,17 @@ class ChatMessage(Base):
     created_at = Column(String(64), default=lambda: datetime.datetime.utcnow().isoformat())
     fault = Column(Integer, default=0)  # store as 0/1 boolean
 
+class Meditation(Base):
+    __tablename__ = "meditations"
+    id = Column(Integer, primary_key=True, index=True)
+    title = Column(String(255), nullable=False)
+    description = Column(String(1024))
+    category = Column(String(128))
+    tags = Column(String(512))  # Store as comma-separated values
+    script = Column(String(4096))
+    image_url = Column(String(512))
+    audio_url = Column(String(512))
+    created_at = Column(String(64), default=lambda: datetime.datetime.utcnow().isoformat())
+    user_id = Column(Integer, index=True)  # Link to user who created it
+
 Base.metadata.create_all(bind=engine)

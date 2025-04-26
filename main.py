@@ -349,3 +349,76 @@ async def delete_session(session_id: int, current_user=Depends(verify_clerk_toke
     db.delete(session)
     db.commit()
     return {"message": f"Session {session_id} deleted successfully."}
+
+# Meditation Endpoints
+@app.post("/meditations/")
+async def create_meditation(request: Request, current_user=Depends(verify_clerk_token), db: Session = Depends(get_db)):
+    """Create a new meditation resource."""
+    data = await request.json()
+    required_fields = ["title", "description", "category"]
+    for field in required_fields:
+        if not data.get(field):
+            raise HTTPException(status_code=400, detail=f"{field} is required")
+    
+    meditation = Meditation(
+        title=data["title"],
+        description=data["description"],
+        category=data["category"],
+        tags=data.get("tags", ""),
+        script=data.get("script", ""),
+        image_url=data.get("image_url", ""),
+        audio_url=data.get("audio_url", ""),
+        user_id=current_user.id
+    )
+    db.add(meditation)
+    db.commit()
+    db.refresh(meditation)
+    return meditation
+
+@app.get("/meditations/")
+async def get_meditations(db: Session = Depends(get_db)):
+    """Get all meditation resources."""
+    meditations = db.query(Meditation).all()
+    return {"meditations": meditations}
+
+@app.get("/meditations/{meditation_id}")
+async def get_meditation(meditation_id: int, db: Session = Depends(get_db)):
+    """Get a specific meditation resource."""
+    meditation = db.query(Meditation).filter(Meditation.id == meditation_id).first()
+    if not meditation:
+        raise HTTPException(status_code=404, detail="Meditation not found")
+    return meditation
+
+@app.put("/meditations/{meditation_id}")
+async def update_meditation(meditation_id: int, request: Request, current_user=Depends(verify_clerk_token), db: Session = Depends(get_db)):
+    """Update a meditation resource."""
+    meditation = db.query(Meditation).filter(
+        Meditation.id == meditation_id,
+        Meditation.user_id == current_user.id
+    ).first()
+    if not meditation:
+        raise HTTPException(status_code=404, detail="Meditation not found or access denied")
+    
+    data = await request.json()
+    for field in ["title", "description", "category", "tags", "script", "image_url", "audio_url"]:
+        if field in data:
+            setattr(meditation, field, data[field])
+    
+    db.commit()
+    db.refresh(meditation)
+    return meditation
+
+@app.delete("/meditations/{meditation_id}")
+async def delete_meditation(meditation_id: int, current_user=Depends(verify_clerk_token), db: Session = Depends(get_db)):
+    """Delete a meditation resource."""
+    meditation = db.query(Meditation).filter(
+        Meditation.id == meditation_id,
+        Meditation.user_id == current_user.id
+    ).first()
+    if not meditation:
+        raise HTTPException(status_code=404, detail="Meditation not found or access denied")
+    
+    db.delete(meditation)
+    db.commit()
+    return {"message": f"Meditation {meditation_id} deleted successfully."}
+
