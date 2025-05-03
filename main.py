@@ -1,6 +1,8 @@
 import os
 from dotenv import load_dotenv
 from fastapi import FastAPI, UploadFile, File, HTTPException, Request, Depends
+from fastapi.security import OAuth2PasswordBearer
+import datetime
 
 load_dotenv()  # Ensure environment variables are loaded from .env in all environments
 from fastapi.responses import JSONResponse
@@ -50,7 +52,6 @@ def get_jwks():
     response = requests.get(CLERK_JWKS_URL)
     response.raise_for_status()
     return response.json()["keys"]
-
 
 def get_public_key(token):
     unverified = jwt.get_unverified_header(token)
@@ -196,33 +197,83 @@ async def upload_pdf(pdf_file: UploadFile = File(...)):
         print(f"Error during PDF processing: {e}")
         raise HTTPException(status_code=500, detail=f"Processing error: {str(e)}")
 
+# JWT Token Configuration
+JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", "your-secret-key-here")
+JWT_ALGORITHM = "HS256"
+ACCESS_TOKEN_EXPIRE_MINUTES = 30
+REFRESH_TOKEN_EXPIRE_DAYS = 7
+
+def create_access_token(data: dict):
+    to_encode = data.copy()
+    expire = datetime.datetime.utcnow() + datetime.timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    to_encode.update({"exp": expire, "type": "access"})
+    return jwt.encode(to_encode, JWT_SECRET_KEY, algorithm=JWT_ALGORITHM)
+
+def create_refresh_token(data: dict):
+    to_encode = data.copy()
+    expire = datetime.datetime.utcnow() + datetime.timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
+    to_encode.update({"exp": expire, "type": "refresh"})
+    return jwt.encode(to_encode, JWT_SECRET_KEY, algorithm=JWT_ALGORITHM)
+
+def verify_token(token: str):
+    try:
+        payload = jwt.decode(token, JWT_SECRET_KEY, algorithms=[JWT_ALGORITHM])
+        return payload
+    except JWTError:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+@app.post("/token")
+async def login_for_access_token(request: Request, db: Session = Depends(get_db)):
+    try:
+        user = await verify_clerk_token(request, db)
+        access_token = create_access_token(data={"sub": user.uid})
+        refresh_token = create_refresh_token(data={"sub": user.uid})
+        return {
+            "access_token": access_token,
+            "refresh_token": refresh_token,
+            "token_type": "bearer"
+        }
+    except HTTPException as e:
+        raise e
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.post("/token/refresh")
+async def refresh_token(request: Request):
+    try:
+        auth_header = request.headers.get("Authorization")
+        if not auth_header or not auth_header.startswith("Bearer "):
+            raise HTTPException(status_code=401, detail="Missing refresh token")
+        refresh_token = auth_header.replace("Bearer ", "")
+        
+        payload = verify_token(refresh_token)
+        if payload.get("type") != "refresh":
+            raise HTTPException(status_code=401, detail="Invalid refresh token type")
+            
+        new_access_token = create_access_token(data={"sub": payload.get("sub")})
+        return {"access_token": new_access_token, "token_type": "bearer"}
+    except HTTPException as e:
+        raise e
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+def get_current_user(token: str = Depends(OAuth2PasswordBearer(tokenUrl="token"))):
+    payload = verify_token(token)
+    if payload.get("type") != "access":
+        raise HTTPException(status_code=401, detail="Invalid access token type")
+    return payload
+
+# Update chat endpoint to use JWT authentication
 @app.post("/chat/")
-async def chat(request: Request, current_user=Depends(verify_clerk_token), db=Depends(get_db)):
+async def chat(request: Request, current_user: dict = Depends(get_current_user)):
     data = await request.json()
     query = data.get("query")
-    session_id = data.get("session_id")
     if not query:
         raise HTTPException(status_code=400, detail="Query required.")
-
-    # --- Find or create a chat session for this user ---
-    if session_id:
-        session = db.query(ChatSession).filter_by(id=session_id, user_id=current_user.id).first()
-        if not session: # Handle case where session_id is provided but doesn't exist or belong to user
-             raise HTTPException(status_code=404, detail="Chat session not found or access denied.")
-    else:
-        session_dict = {"user_id": current_user.id}
-        # Use .get() for potentially long-running task, consider timeout
-        try:
-            session_id = save_chat_session_task.delay(session_dict).get(timeout=10) 
-            session = ChatSession(id=session_id, user_id=current_user.id) # Create a temporary object for immediate use
-        except Exception as e:
-            # Log the error appropriately
-            print(f"Error creating chat session via Celery: {e}")
-            raise HTTPException(status_code=500, detail="Failed to create chat session.")
-
-    # Save user message asynchronously
-    user_msg_dict = {"session_id": session.id, "user_id": current_user.id, "role": "user", "message": query}
-    save_chat_message_task.delay(user_msg_dict)
 
     # --- Langchain RAG Implementation ---
     try:
@@ -272,6 +323,8 @@ async def chat(request: Request, current_user=Depends(verify_clerk_token), db=De
         - Highlighting key points in bold
         - Use emojis and short phrases for a more engaging experience
         - Avoiding to meantion the source of the information
+        - Always answer "Inspired by Sedona Method"
+        - Do not directly say that we are directly from the source, but instead say that we are inspired by the Sedona Method
         - Avoid to answer questions that are not related to the context
         
         Let me break this down for you:
@@ -288,67 +341,13 @@ async def chat(request: Request, current_user=Depends(verify_clerk_token), db=De
 
         # 4. Invoke Chain
         ai_response = rag_chain.invoke(query)
-
-        # Save AI message asynchronously
-        ai_msg_dict = {"session_id": session.id, "user_id": current_user.id, "role": "assistant", "message": ai_response}
-        save_chat_message_task.delay(ai_msg_dict)
-
-        return JSONResponse(content={"response": ai_response, "session_id": session.id})
+        return JSONResponse(content={"response": ai_response})
 
     except Exception as e:
         # Log the error appropriately
         print(f"Error during Langchain RAG processing: {e}")
         # Consider more specific error handling based on potential Langchain exceptions
         raise HTTPException(status_code=500, detail=f"Chat processing error: {str(e)}")
-
-# --- Old /chat/ logic removed, replaced by Langchain implementation above ---
-
-@app.get("/chat_sessions/", response_model=None)
-async def get_chat_sessions(current_user=Depends(verify_clerk_token), db: Session = Depends(get_db)):
-    """Returns all chat sessions and their messages for the current authenticated user."""
-    sessions = db.query(ChatSession).filter_by(user_id=current_user.id).all()
-    session_data = []
-    for session in sessions:
-        messages = db.query(ChatMessage).filter_by(session_id=session.id).order_by(ChatMessage.created_at.asc()).all()
-        session_data.append({
-            "session_id": session.id,
-            "created_at": session.created_at,
-            "title": session.title,
-            "messages": [
-                {
-                    "id": msg.id,
-                    "role": msg.role,
-                    "message": msg.message,
-                    "created_at": msg.created_at,
-                    "fault": msg.fault
-                } for msg in messages
-            ]
-        })
-    return {"sessions": session_data}
-
-@app.put("/chat_sessions/{session_id}/title")
-async def update_session_title(session_id: int, data: dict, current_user=Depends(verify_clerk_token), db: Session = Depends(get_db)):
-    """Allows the current authenticated user to update the title of their chat session."""
-    session = db.query(ChatSession).filter_by(id=session_id, user_id=current_user.id).first()
-    if not session:
-        raise HTTPException(status_code=404, detail="Session not found.")
-    new_title = data.get("title")
-    if not new_title:
-        raise HTTPException(status_code=400, detail="Title is required.")
-    session.title = new_title
-    db.commit()
-    db.refresh(session)
-    return {"session_id": session.id, "title": session.title}
-
-@app.delete("/chat_sessions/{session_id}")
-async def delete_session(session_id: int, current_user=Depends(verify_clerk_token), db: Session = Depends(get_db)):
-    """Allows the current authenticated user to delete their chat session."""
-    session = db.query(ChatSession).filter_by(id=session_id, user_id=current_user.id).first()
-    if not session:
-        raise HTTPException(status_code=404, detail="Session not found.")
-    db.delete(session)
-    db.commit()
-    return {"message": f"Session {session_id} deleted successfully."}
 
 # Meditation Endpoints
 @app.post("/meditations/")
@@ -421,4 +420,34 @@ async def delete_meditation(meditation_id: int, current_user=Depends(verify_cler
     db.delete(meditation)
     db.commit()
     return {"message": f"Meditation {meditation_id} deleted successfully."}
+
+
+@app.post("/login")
+async def login(request: Request):
+    try:
+        data = await request.json()
+        secret_token = data.get("secret_token")
+        if not secret_token:
+            raise HTTPException(status_code=400, detail="Secret token is required")
+            
+        env_secret_token = os.getenv("SECRET_TOKEN")
+        if not env_secret_token:
+            raise HTTPException(status_code=500, detail="Server secret token not configured")
+            
+        if secret_token != env_secret_token:
+            raise HTTPException(status_code=401, detail="Invalid secret token")
+            
+        # Generate tokens
+        access_token = create_access_token(data={"sub": "admin"})
+        refresh_token = create_refresh_token(data={"sub": "admin"})
+        
+        return {
+            "access_token": access_token,
+            "refresh_token": refresh_token,
+            "token_type": "bearer"
+        }
+    except HTTPException as e:
+        raise e
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
 

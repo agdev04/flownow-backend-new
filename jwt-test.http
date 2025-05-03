@@ -1,0 +1,29 @@
+@baseUrl = http://0.0.0.0:3005
+
+### Step 1: Login to get Access and Refresh Tokens
+POST {{baseUrl}}/login
+Content-Type: application/json
+
+{
+    "secret_token": "mysecretkey"
+}
+
+### Step 2: Use Access Token to Access Chat Endpoint
+POST {{baseUrl}}/chat
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJhZG1pbiIsImV4cCI6MTc0NjI4NjE0NSwidHlwZSI6ImFjY2VzcyJ9.7n-mEbJA_c-MLURqMG-rsSKaK8Q04dN7Nk0fKw_3YBE
+Content-Type: application/json
+
+{
+    "query": "What is meditation?"
+}
+
+### Step 3: Refresh Access Token using Refresh Token
+POST {{baseUrl}}/token/refresh
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJhZG1pbiIsImV4cCI6MTc0Njg4OTAyNSwidHlwZSI6InJlZnJlc2gifQ.lWBB6dwCmbrsaxXb-tBC7IILzFp3EsIlhKZveqN8xNs
+
+### Notes:
+# 1. Set SECRET_TOKEN in your .env file
+# 2. Replace <your_access_token_here> with the access token received from /login endpoint
+# 3. Replace <your_refresh_token_here> with the refresh token received from /login endpoint
+# 4. Access tokens expire in 30 minutes
+# 5. Refresh tokens expire in 7 days
